@@ -1,0 +1,73 @@
+---
+# Namespace 생성
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-serving
+---
+# Self-signed ClusterIssuer
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+# CA Certificate
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ai-serving-ca
+  namespace: ai-serving
+spec:
+  isCA: true
+  commonName: ai-serving-ca
+  secretName: ai-serving-ca-secret
+  privateKey:
+    algorithm: RSA
+    size: 4096
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+---
+# CA Issuer (실제 인증서 발급용)
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: ca-issuer
+  namespace: ai-serving
+spec:
+  ca:
+    secretName: ai-serving-ca-secret
+---
+# LLM Service Certificate
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: llm-tls-cert
+  namespace: ai-serving
+spec:
+  secretName: llm-tls-secret
+  issuerRef:
+    name: ca-issuer
+    kind: Issuer
+  dnsNames:
+  - llm.ai-serving.local
+  - llm.local
+  - "*.llm.local"
+---
+# Stable Diffusion Service Certificate
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: sd-tls-cert
+  namespace: ai-serving
+spec:
+  secretName: sd-tls-secret
+  issuerRef:
+    name: ca-issuer
+    kind: Issuer
+  dnsNames:
+  - sd.ai-serving.local
+  - sd.local
+  - "*.sd.local"

@@ -1,0 +1,64 @@
+---
+# LLM Ingress with HTTPS
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: llm-ingress
+  namespace: ai-serving
+  annotations:
+    cert-manager.io/issuer: "ca-issuer"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - llm.ai-serving.local
+    secretName: llm-tls-secret
+  rules:
+  - host: llm.ai-serving.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: llm-service
+            port:
+              number: 80
+---
+# Stable Diffusion Ingress with HTTPS
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sd-ingress
+  namespace: ai-serving
+  annotations:
+    cert-manager.io/issuer: "ca-issuer"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-body-size: "500m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "1200"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "1200"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - sd.ai-serving.local
+    secretName: sd-tls-secret
+  rules:
+  - host: sd.ai-serving.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: sd-service
+            port:
+              number: 80

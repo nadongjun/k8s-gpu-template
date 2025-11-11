@@ -1,0 +1,108 @@
+---
+# LLM Serving Deployment with GPU (vLLM)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-serving
+  namespace: ai-serving
+  labels:
+    app: llm-serving
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm-serving
+  template:
+    metadata:
+      labels:
+        app: llm-serving
+    spec:
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:latest
+        ports:
+        - containerPort: 8000
+          name: http
+        command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+        args:
+        - "--model"
+        - "mistralai/Mistral-7B-Instruct-v0.2"
+        - "--host"
+        - "0.0.0.0"
+        - "--port"
+        - "8000"
+        - "--gpu-memory-utilization"
+        - "0.9"
+        - "--max-model-len"
+        - "4096"
+        - "--trust-remote-code"
+        env:
+        - name: HUGGING_FACE_HUB_TOKEN
+          value: ""  # HF 토큰이 필요한 경우 여기에 추가
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: "all"
+        - name: NVIDIA_DRIVER_CAPABILITIES
+          value: "compute,utility"
+        resources:
+          requests:
+            memory: "8Gi"
+            cpu: "4"
+            nvidia.com/gpu: "1"
+          limits:
+            memory: "24Gi"
+            cpu: "8"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: huggingface-cache
+          mountPath: /root/.cache/huggingface
+        - name: shm
+          mountPath: /dev/shm
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30
+      volumes:
+      - name: huggingface-cache
+        emptyDir:
+          sizeLimit: 30Gi
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 8Gi
+---
+# LLM Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-service
+  namespace: ai-serving
+  labels:
+    app: llm-serving
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: llm-serving

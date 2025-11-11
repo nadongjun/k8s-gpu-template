@@ -1,0 +1,101 @@
+---
+# LLM Serving Deployment without GPU (vLLM CPU mode)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-serving
+  namespace: ai-serving
+  labels:
+    app: llm-serving
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm-serving
+  template:
+    metadata:
+      labels:
+        app: llm-serving
+    spec:
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:latest
+        ports:
+        - containerPort: 8000
+          name: http
+        command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+        args:
+        - "--model"
+        - "mistralai/Mistral-7B-Instruct-v0.2"
+        - "--host"
+        - "0.0.0.0"
+        - "--port"
+        - "8000"
+        - "--max-model-len"
+        - "2048"
+        - "--trust-remote-code"
+        # CPU 모드는 매우 느리므로 경고
+        env:
+        - name: HUGGING_FACE_HUB_TOKEN
+          value: ""
+        resources:
+          requests:
+            memory: "8Gi"
+            cpu: "4"
+          limits:
+            memory: "8Gi"
+            cpu: "8"
+        volumeMounts:
+        - name: huggingface-cache
+          mountPath: /root/.cache/huggingface
+        - name: shm
+          mountPath: /dev/shm
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 180
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 10
+          timeoutSeconds: 5
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 40
+      volumes:
+      - name: huggingface-cache
+        emptyDir:
+          sizeLimit: 30Gi
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 4Gi
+---
+# LLM Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-service
+  namespace: ai-serving
+  labels:
+    app: llm-serving
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: llm-serving
