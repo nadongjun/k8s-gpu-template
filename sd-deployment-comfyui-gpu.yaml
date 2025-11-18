@@ -1,0 +1,176 @@
+---
+# Stable Diffusion A1111 API Deployment (Ingress용)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sd-a1111-api
+  namespace: ai-serving
+  labels:
+    app: sd-serving
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sd-serving
+  template:
+    metadata:
+      labels:
+        app: sd-serving
+    spec:
+      containers:
+      - name: stable-diffusion-webui-api
+        image: nvidia/cuda:11.8.0-runtime-ubuntu22.04
+        ports:
+        - containerPort: 7860
+          name: http
+          protocol: TCP
+        workingDir: /workspace
+        command: ["/bin/bash"]
+        args:
+        - -c
+        - |
+          set -e
+          echo "=== AUTOMATIC1111 Stable Diffusion API 설치 ==="
+          
+          # 기본 패키지 설치
+          apt-get update && apt-get install -y \
+            python3 python3-pip python3-venv \
+            git wget curl libgl1 libglib2.0-0 \
+            build-essential
+          
+          # 작업 디렉토리 설정
+          cd /workspace
+          
+          # AUTOMATIC1111 Web UI 클론
+          if [ ! -d "/workspace/stable-diffusion-webui" ]; then
+            echo "Web UI 저장소 클론 중..."
+            git clone https://github.com/AUTOMATIC1111/stable-diffusion-webui.git
+          fi
+          
+          cd stable-diffusion-webui
+          
+          # Python 가상환경 생성
+          python3 -m venv venv
+          source venv/bin/activate
+          
+          # PyTorch 설치
+          echo "PyTorch 설치 중..."
+          pip install --no-cache-dir torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cu118
+          
+          # 필요한 패키지 설치
+          pip install --no-cache-dir -r requirements.txt
+          
+          # Stable Diffusion v1.5 모델 다운로드
+          echo "Stable Diffusion v1.5 모델 다운로드 중..."
+          mkdir -p models/Stable-diffusion
+          
+          if [ ! -f "models/Stable-diffusion/v1-5-pruned-emaonly.safetensors" ]; then
+            wget -O models/Stable-diffusion/v1-5-pruned-emaonly.safetensors \
+              https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors
+          fi
+          
+          # VAE 모델 다운로드
+          mkdir -p models/VAE
+          if [ ! -f "models/VAE/vae-ft-mse-840000-ema-pruned.safetensors" ]; then
+            wget -O models/VAE/vae-ft-mse-840000-ema-pruned.safetensors \
+              https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.safetensors
+          fi
+          
+          echo "=== API 서버 시작 (Web UI 비활성화) ==="
+          
+          # API 전용 모드로 실행 (xFormers 제거)
+          python3 launch.py \
+            --api \
+            --nowebui \
+            --listen \
+            --port 7860 \
+            --skip-torch-cuda-test \
+            --no-half-vae \
+            --opt-split-attention \
+            --enable-insecure-extension-access \
+            --disable-safe-unpickle
+        env:
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: "all"
+        - name: NVIDIA_DRIVER_CAPABILITIES
+          value: "compute,utility"
+        - name: PYTORCH_CUDA_ALLOC_CONF
+          value: "max_split_size_mb:512"
+        resources:
+          requests:
+            memory: "12Gi"
+            cpu: "2"
+            nvidia.com/gpu: "1"
+          limits:
+            memory: "20Gi"
+            cpu: "4"
+            nvidia.com/gpu: "1"
+        volumeMounts:
+        - name: sd-data
+          mountPath: /workspace
+        - name: shm
+          mountPath: /dev/shm
+        livenessProbe:
+          httpGet:
+            path: /sdapi/v1/sd-models
+            port: 7860
+          initialDelaySeconds: 900
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /sdapi/v1/sd-models
+            port: 7860
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          timeoutSeconds: 10
+          failureThreshold: 5
+        startupProbe:
+          httpGet:
+            path: /sdapi/v1/sd-models
+            port: 7860
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 40
+      volumes:
+      - name: sd-data
+        persistentVolumeClaim:
+          claimName: sd-a1111-pvc
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 8Gi
+---
+# PersistentVolumeClaim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sd-a1111-pvc
+  namespace: ai-serving
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard  # 기존 PVC와 동일한 storageClassName
+  resources:
+    requests:
+      storage: 50Gi
+---
+# Service (기존 Ingress의 sd-service와 연결)
+apiVersion: v1
+kind: Service
+metadata:
+  name: sd-service
+  namespace: ai-serving
+  labels:
+    app: sd-serving
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 7860
+    protocol: TCP
+    name: http
+  selector:
+    app: sd-serving

@@ -1,5 +1,5 @@
 ---
-# LLM Serving Deployment with GPU (vLLM)
+# LLM Serving Deployment with GPU (vLLM) - Smaller Model for RTX 4070
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -26,31 +26,33 @@ spec:
         command: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
         args:
         - "--model"
-        - "mistralai/Mistral-7B-Instruct-v0.2"
+        - "microsoft/Phi-3-mini-4k-instruct"  # 3.8B 파라미터 (더 작음)
         - "--host"
         - "0.0.0.0"
         - "--port"
         - "8000"
         - "--gpu-memory-utilization"
-        - "0.9"
+        - "0.8"
         - "--max-model-len"
         - "4096"
         - "--trust-remote-code"
+        - "--dtype"
+        - "half"
         env:
         - name: HUGGING_FACE_HUB_TOKEN
-          value: ""  # HF 토큰이 필요한 경우 여기에 추가
+          value: ""
         - name: NVIDIA_VISIBLE_DEVICES
           value: "all"
         - name: NVIDIA_DRIVER_CAPABILITIES
           value: "compute,utility"
         resources:
           requests:
-            memory: "8Gi"
-            cpu: "4"
+            memory: "6Gi"
+            cpu: "2"
             nvidia.com/gpu: "1"
           limits:
-            memory: "24Gi"
-            cpu: "8"
+            memory: "10Gi"
+            cpu: "4"
             nvidia.com/gpu: "1"
         volumeMounts:
         - name: huggingface-cache
@@ -83,7 +85,7 @@ spec:
       volumes:
       - name: huggingface-cache
         emptyDir:
-          sizeLimit: 30Gi
+          sizeLimit: 20Gi
       - name: shm
         emptyDir:
           medium: Memory
